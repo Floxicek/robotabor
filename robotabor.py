@@ -1,5 +1,7 @@
 import brian.motors as motors
 import math
+from time import sleep
+
 
 #########################
 ### Šikovné konstanty ###
@@ -34,11 +36,15 @@ class Pilot:
         self.wheel_diameter = wheel_diameter
         self.axle_width = axle_width
         self.reverse = bool(reverse)
+        self.version = "1.0"
+        self.debug = False
 
         self.speed = 400  # deg/s
         self._angle_offset = (
             self.left_motor.current_angle() - self.right_motor.current_angle()
         )
+        self.angle_tolerance = 3
+        self.tolerance_time = 0.2  # sekundy
 
     def _mm_to_deg(self, mm: float) -> float:
         """
@@ -64,6 +70,43 @@ class Pilot:
         """
         return deg * (math.pi * self.wheel_diameter) / 360
 
+    def _wait_until_movement_done(
+        self,
+        left_angle: float,
+        right_angle: float,
+        left_target: float,
+        right_target: float,
+    ):
+        """
+        Čeká, dokud robot nedokončí pohyb na základě cílových úhlů motorů.
+
+        Argumenty:
+            left_angle (float): Počáteční úhel levého motoru.
+            right_angle (float): Počáteční úhel pravého motoru.
+            left_target (float): Cílový úhel levého motoru.
+            right_target (float): Cílový úhel pravého motoru.
+        """
+        in_tolerance_time = 0
+        wait_time = 0.1  # sekundy
+        while in_tolerance_time < self.tolerance_time:
+            if (
+                abs(self.left_motor.current_angle() - (left_angle + left_target))
+                <= self.angle_tolerance
+                and abs(self.right_motor.current_angle() - (right_angle + right_target))
+                <= self.angle_tolerance
+            ):
+                in_tolerance_time += wait_time
+            else:
+                in_tolerance_time = 0
+                sleep(wait_time)
+
+        if self.debug:
+            print(
+                f"Movement done: "
+                f"Left diff: {self.left_motor.current_angle() - (left_angle + left_target)}, "
+                f"Right diff: {self.right_motor.current_angle() - (right_angle + right_target)}"
+            )
+
     def _run_motor_at_speeds(self, left_speed: float, right_speed: float):
         """Nastaví okamžité rychlosti motorů (deg/s, vč. znaménka)."""
         self.left_motor.run_at_speed(round(left_speed))
@@ -82,7 +125,7 @@ class Pilot:
         direction = 1 if self.reverse else -1
         self._run_motor_at_speeds(direction * self.speed, direction * self.speed)
 
-    def travel(self, distance: float, wait_until_done: bool = True, timeout: float = None):
+    def travel(self, distance: float, wait_until_done: bool = True):
         """
         Jede danou vzdálenost v milimetrech.
 
@@ -94,18 +137,16 @@ class Pilot:
 
         if self.reverse:
             degrees = -degrees
+
+        left_angle = self.left_motor.current_angle()
+        right_angle = self.right_motor.current_angle()
         self.left_motor.rotate_by_angle(round(degrees), round(self.speed), 0)
         self.right_motor.rotate_by_angle(round(degrees), round(self.speed), 0)
 
         if wait_until_done:
-            if timeout is None:
-                self.left_motor.wait_for_movement()
-                self.right_motor.wait_for_movement()
-            else:
-                self.left_motor.wait_for_movement(timeout*1000)
-                self.right_motor.wait_for_movement(timeout*1000)
+            self._wait_until_movement_done(left_angle, right_angle, degrees, degrees)
 
-    def rotate(self, angle: float, wait_until_done: bool = True, timeout: float = None):
+    def rotate(self, angle: float, wait_until_done: bool = True):
         """
         Otočí robota na místě o daný úhel v stupních.
 
@@ -119,19 +160,17 @@ class Pilot:
         left_speed = self.speed if not self.reverse else -self.speed
         right_speed = -left_speed
 
+        left_angle = self.left_motor.current_angle()
+        right_angle = self.right_motor.current_angle()
+
         self.left_motor.rotate_by_angle(round(degrees), round(left_speed), 0)
-        self.right_motor.rotate_by_angle(-round(degrees), round(right_speed), 0)
+        self.right_motor.rotate_by_angle(round(-degrees), round(right_speed), 0)
 
         if wait_until_done:
-            if timeout is None:
-                self.left_motor.wait_for_movement()
-                self.right_motor.wait_for_movement()
-            else:
-                self.left_motor.wait_for_movement(timeout*1000)
-                self.right_motor.wait_for_movement(timeout*1000)
+            self._wait_until_movement_done(left_angle, right_angle, degrees, -degrees)
 
     def steer(
-        self, turn_rate: float, angle: float = None, wait_until_done: bool = True, timeout: float = None
+        self, turn_rate: float, angle: float = None, wait_until_done: bool = True
     ):
         """
         Řízená jízda po kružnici.
@@ -188,19 +227,17 @@ class Pilot:
         s_l_mm = v_l_mm * t
         s_r_mm = v_r_mm * t
 
-        deg_l = self._mm_to_deg(s_l_mm)
-        deg_r = self._mm_to_deg(s_r_mm)
+        deg_l = round(self._mm_to_deg(s_l_mm))
+        deg_r = round(self._mm_to_deg(s_r_mm))
 
-        self.left_motor.rotate_by_angle(round(deg_l), round(abs(left_speed)), 0)
-        self.right_motor.rotate_by_angle(round(deg_r), round(abs(right_speed)), 0)
+        left_angle = self.left_motor.current_angle()
+        right_angle = self.right_motor.current_angle()
+
+        self.left_motor.rotate_by_angle(deg_l, round(abs(left_speed)), 0)
+        self.right_motor.rotate_by_angle(deg_r, round(abs(right_speed)), 0)
 
         if wait_until_done:
-            if timeout is None:
-                self.left_motor.wait_for_movement()
-                self.right_motor.wait_for_movement()
-            else:
-                self.left_motor.wait_for_movement(timeout*1000)
-                self.right_motor.wait_for_movement(timeout*1000)
+            self._wait_until_movement_done(left_angle, right_angle, deg_l, deg_r)
 
     def stop(self):
         """
