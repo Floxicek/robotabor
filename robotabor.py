@@ -326,11 +326,19 @@ class NotePlayer:
         """Přidá tón (frekvenci a dobu trvání v ms) do fronty přehrávání."""
         self.queue.append((frequency, duration_ms))
 
-    def play(self):
-        """Spustí přehrávání fronty tónů od začátku."""
+    def play(self, blocking=True):
+        """
+        Spustí přehrávání fronty tónů od začátku.
+        Pokud je `blocking` nastaven na `False`, tak je potřeba volat funkci `update()`
+        """
         self.current_index = 0
         self.is_playing = True
         self.note_start_time = 0
+
+        while blocking and self.is_playing:
+            for note in self.queue:
+                play_tone(note[0],note[1])
+                time.sleep(note[1]/1000)
 
     def stop(self):
         """Zastaví přehrávání tónů a resetuje pozici ve frontě."""
